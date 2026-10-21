@@ -1,6 +1,16 @@
 """Vercel serverless function handler for 7hclipper.
 
 Allows deploying 7hclipper as a Vercel serverless function.
+Provides transcript analysis and moment identification (works without FFmpeg).
+Full video processing (clipping + caption burning) requires FFmpeg installed on the server.
+
+Expected POST body:
+{
+    "url": "https://www.youtube.com/watch?v=VIDEO_ID",
+    "duration": 60,
+    "aspect": "9:16",
+    "model": "claude"
+}
 """
 
 import json
@@ -8,8 +18,6 @@ import os
 import sys
 import tempfile
 import logging
-import base64
-import shutil
 
 # Add the src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
@@ -26,13 +34,15 @@ logger.setLevel(logging.INFO)
 def handler(event, context):
     """Vercel serverless handler for 7hclipper.
     
-    Expected POST body:
-    {
-        "url": "https://www.youtube.com/watch?v=VIDEO_ID",
-        "duration": 60,
-        "aspect": "9:16",
-        "model": "claude"
-    }
+    This function provides:
+    - YouTube URL validation
+    - Transcript extraction (via yt-dlp, may have SSL limitations in some regions)
+    - AI moment identification from transcript
+    - Returns analysis data for client-side video processing
+    
+    Note: Full video clipping (FFmpeg-based) requires FFmpeg installed on the server,
+    which is not available in Vercel's default serverless environment. Clients should
+    use the CLI tool locally with FFmpeg installed for complete video processing.
     """
     
     try:
@@ -56,7 +66,7 @@ def handler(event, context):
         logger.info(f"Processing URL: {url}")
         logger.info(f"Duration: {duration}, Aspect: {aspect}, Model: {model}")
         
-        # Initialize YouTube handler
+        # Initialize YouTube handler (just validates URL)
         yt = YouTubeHandler(url)
         
         # Extract transcript
@@ -69,7 +79,7 @@ def handler(event, context):
                 'body': json.dumps({'error': 'No transcript available for this video'})
             }
         
-        # Identify best moments
+        # Identify best moments (text analysis only - no FFmpeg needed)
         clipper = VideoClipper(transcript, model=model)
         best_moments = clipper.identify_best_moments()
         
@@ -79,63 +89,39 @@ def handler(event, context):
                 'body': json.dumps({'error': 'No best moments identified'})
             }
         
-        # Create output directory
-        output_dir = tempfile.mkdtemp()
+        # Prepare analysis response - this part works without FFmpeg
+        moments_data = []
+        for moment in best_moments:
+            moments_data.append({
+                'start': moment['start'],
+                'end': moment['end'],
+                'duration': moment['end'] - moment['start'],
+                'text': moment['text'][:100] + '...' if len(moment['text']) > 100 else moment['text'],
+                'score': None  # Would be set by AI model analysis
+            })
         
-        try:
-            # Clip to vertical video
-            video_clipper = VideoClipper(transcript, model=model)
-            video_path = video_clipper.clip_to_vertical(
-                best_moments, output_dir, aspect
-            )
-            
-            # Generate captions
-            captioner = CaptionGenerator(transcript)
-            caption_path = captioner.generate_captions(video_path)
-            
-            # Read the output files
-            video_data = None
-            caption_data = None
-            
-            if os.path.exists(video_path):
-                with open(video_path, 'rb') as f:
-                    video_data = f.read()
-            
-            if os.path.exists(caption_path):
-                with open(caption_path, 'rb') as f:
-                    caption_data = f.read()
-            
-            # Clean up temp files
-            shutil.rmtree(output_dir, ignore_errors=True)
-            
-            # Build response
-            response = {
-                'message': 'Video processed successfully' if video_data else 'Video processed with limitations'
+        response = {
+            'url': url,
+            'video_title': yt.title if hasattr(yt, 'title') else 'Unknown',
+            'transcript_length': len(transcript),
+            'model_used': model,
+            'best_moments': moments_data,
+            'analysis_summary': {
+                'total_segments_analyzed': len(best_moments),
+                'duration_analyzed': duration,
+                'aspect_ratio': aspect,
+                'note': 'Full video clipping requires FFmpeg. Use 7hclipper CLI locally or deploy to an environment with FFmpeg.'
             }
-            
-            # If files exist and are reasonable size, include base64
-            if video_data and len(video_data) < 5 * 1024 * 1024:  # < 5MB
-                response['video_base64'] = base64.b64encode(video_data).decode('utf-8')
-                response['video_filename'] = 'vertical_clip.mp4'
-            
-            if caption_data and len(caption_data) < 1 * 1024 * 1024:  # < 1MB
-                response['caption_base64'] = base64.b64encode(caption_data).decode('utf-8')
-                response['caption_filename'] = 'captions.srt'
-            
-            return {
-                'statusCode': 200,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*'
-                },
-                'body': json.dumps(response)
-            }
-            
-        except Exception as e:
-            logger.error(f"Error during video processing: {str(e)}", exc_info=True)
-            # Clean up on error
-            shutil.rmtree(output_dir, ignore_errors=True)
-            raise
+        }
+        
+        return {
+            'statusCode': 200,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps(response)
+        }
         
     except Exception as e:
         logger.error(f"Error processing request: {str(e)}", exc_info=True)
