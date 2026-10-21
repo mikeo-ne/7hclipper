@@ -1,13 +1,15 @@
-#!/usr/bin/env python3
 """Vercel serverless function handler for 7hclipper.
 
 Allows deploying 7hclipper as a Vercel serverless function.
-Usage: POST to the Vercel function with JSON body:
+Provides transcript analysis and moment identification (works without FFmpeg).
+Full video processing (clipping + caption burning) requires FFmpeg installed on the server.
+
+Expected POST body:
 {
-  "url": "https://www.youtube.com/watch?v=VIDEO_ID",
-  "duration": 60,
-  "aspect": "9:16",
-  "model": "claude"
+    "url": "https://www.youtube.com/watch?v=VIDEO_ID",
+    "duration": 60,
+    "aspect": "9:16",
+    "model": "claude"
 }
 """
 
@@ -18,7 +20,7 @@ import tempfile
 import logging
 
 # Add the src directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from py7hclipper.youtube import YouTubeHandler
 from py7hclipper.transcript import TranscriptExtractor
@@ -30,7 +32,16 @@ logger.setLevel(logging.INFO)
 
 
 def handler(event, context):
-    """Vercel serverless handler for 7hclipper."""
+    """Vercel serverless handler for 7hclipper.
+    
+    Expected POST body:
+    {
+        "url": "https://www.youtube.com/watch?v=VIDEO_ID",
+        "duration": 60,
+        "aspect": "9:16",
+        "model": "claude"
+    }
+    """
     
     try:
         # Parse request body
@@ -53,7 +64,7 @@ def handler(event, context):
         logger.info(f"Processing URL: {url}")
         logger.info(f"Duration: {duration}, Aspect: {aspect}, Model: {model}")
         
-        # Initialize YouTube handler
+        # Initialize YouTube handler (just validates URL)
         yt = YouTubeHandler(url)
         
         # Extract transcript
@@ -66,7 +77,7 @@ def handler(event, context):
                 'body': json.dumps({'error': 'No transcript available for this video'})
             }
         
-        # Identify best moments
+        # Identify best moments (text analysis only - no FFmpeg needed)
         clipper = VideoClipper(transcript, model=model)
         best_moments = clipper.identify_best_moments()
         
@@ -76,32 +87,29 @@ def handler(event, context):
                 'body': json.dumps({'error': 'No best moments identified'})
             }
         
-        # Clip to vertical video
-        import os
-        output_dir = tempfile.mkdtemp()
+        # Prepare analysis response - this part works without FFmpeg
+        moments_data = []
+        for moment in best_moments:
+            moments_data.append({
+                'start': moment['start'],
+                'end': moment['end'],
+                'duration': moment['end'] - moment['start'],
+                'text': moment['text'][:100] + '...' if len(moment['text']) > 100 else moment['text'],
+            })
         
-        video_clipper = VideoClipper(transcript, model=model)
-        video_path = video_clipper.clip_to_vertical(
-            best_moments, output_dir, aspect
-        )
-        
-        # Generate captions
-        captioner = CaptionGenerator(transcript)
-        caption_path = captioner.generate_captions(video_path)
-        
-        # Read the output files
-        with open(video_path, 'rb') as f:
-            video_data = f.read()
-        
-        with open(caption_path, 'rb') as f:
-            caption_data = f.read()
-        
-        # Clean up temp files
-        import shutil
-        shutil.rmtree(output_dir, ignore_errors=True)
-        
-        # Return results (base64 encoded since Vercel limits response size)
-        import base64
+        response = {
+            'url': url,
+            'video_title': getattr(yt, 'title', 'Unknown'),
+            'transcript_length': len(transcript),
+            'model_used': model,
+            'best_moments': moments_data,
+            'analysis_summary': {
+                'total_segments_analyzed': len(best_moments),
+                'duration_analyzed': duration,
+                'aspect_ratio': aspect,
+                'note': 'Full video clipping requires FFmpeg. Use 7hclipper CLI locally or deploy to an environment with FFmpeg.'
+            }
+        }
         
         return {
             'statusCode': 200,
@@ -109,13 +117,7 @@ def handler(event, context):
                 'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*'
             },
-            'body': json.dumps({
-                'video_base64': base64.b64encode(video_data).decode('utf-8')[:10000] if video_data else None,
-                'caption_base64': base64.b64encode(caption_data).decode('utf-8')[:1000] if caption_data else None,
-                'video_path': video_path if video_data else None,
-                'caption_path': caption_path if caption_data else None,
-                'message': 'Video processed successfully' if video_data else 'Video processing with limitations'
-            })
+            'body': json.dumps(response)
         }
         
     except Exception as e:
