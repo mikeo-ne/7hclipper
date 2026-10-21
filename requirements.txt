@@ -1,0 +1,33 @@
+yt-dlp
+ffmpeg-python
+pytube
+```
+
+## Project Structure
+
+```
+/home/user/7hclipper
+├── README.md
+├── requirements.txt
+├── src/
+│   ├── 7hclipper_main.py        # Main entry point script
+│   └── py7hclipper/             # Python package
+│       ├── __init__.py          # Package init
+│       ├── youtube.py           # YouTube handler
+│       ├── transcript.py        # Transcript extractor
+│       ├── clipper.py           # Video clipper
+│       └── captioner.py         # Caption generator
+└── output/                      # Output directory (created at runtime)
+```
+
+## How It Works
+
+1. **Fetch**: YouTube video metadata and transcript are extracted using `yt-dlp`
+2. **Analyze**: Transcript is analyzed for "best moments" using heuristics based on sentence structure, keyword density, and impact words
+3. **Clip**: Identified moments are clipped and reformatted to vertical 9:16 aspect ratio using FFmpeg
+4. **Caption**: Transcript segments are burned into the video as burnt-in subtitles
+5. **Output**: Vertical short-form video with captions ready for TikTok/Reels/Shorts
+```
+</think>
+<tool_call>
+<function=bash>
