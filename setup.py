@@ -4,7 +4,8 @@ setup(
     name="7hclipper",
     version="0.1.0",
     description="AI-powered YouTube video clipping and lyric video generation",
-    packages=find_packages(),
+    package_dir={"": "src"},
+    packages=find_packages(where="src"),
     install_requires=[
         "yt-dlp",
         "ffmpeg-python",
