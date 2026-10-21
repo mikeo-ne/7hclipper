@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.env
+.venv
+
+# Output directory
+output/
+
+# Preview/Generated files
+preview.png
+
+# Distribution
+dist/
+build/
+*.egg-info/

@@ -1,0 +1,8 @@
+{
+  "framework": "python",
+  "buildCommand": "pip install -e .",
+  "pipInstallCommand": "pip install -e .",
+  "systemInstallCommand": "pip install -e .",
+  "pythonVersion": "3.11",
+  "runtime": "python3.11"
+}
